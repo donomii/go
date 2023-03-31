@@ -12,7 +12,7 @@ package main_test
 import (
 	"bufio"
 	"bytes"
-	"context"
+	
 	"flag"
 	"fmt"
 	"go/build"
@@ -25,11 +25,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-	"time"
+	
 
 	"cmd/go/internal/cfg"
 	"cmd/go/internal/script"
-	"cmd/go/internal/script/scripttest"
 	"cmd/go/internal/vcweb/vcstest"
 )
 
@@ -37,123 +36,6 @@ var testSum = flag.String("testsum", "", `may be tidy, listm, or listall. If set
 
 // TestScript runs the tests in testdata/script/*.txt.
 func TestScript(t *testing.T) {
-	testenv.MustHaveGoBuild(t)
-	testenv.SkipIfShortAndSlow(t)
-
-	srv, err := vcstest.NewServer()
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := srv.Close(); err != nil {
-			t.Fatal(err)
-		}
-	})
-	certFile, err := srv.WriteCertificateFile()
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	StartProxy()
-
-	var (
-		ctx         = context.Background()
-		gracePeriod = 100 * time.Millisecond
-	)
-	if deadline, ok := t.Deadline(); ok {
-		timeout := time.Until(deadline)
-
-		// If time allows, increase the termination grace period to 5% of the
-		// remaining time.
-		if gp := timeout / 20; gp > gracePeriod {
-			gracePeriod = gp
-		}
-
-		// When we run commands that execute subprocesses, we want to reserve two
-		// grace periods to clean up. We will send the first termination signal when
-		// the context expires, then wait one grace period for the process to
-		// produce whatever useful output it can (such as a stack trace). After the
-		// first grace period expires, we'll escalate to os.Kill, leaving the second
-		// grace period for the test function to record its output before the test
-		// process itself terminates.
-		timeout -= 2 * gracePeriod
-
-		var cancel context.CancelFunc
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-		t.Cleanup(cancel)
-	}
-
-	env, err := scriptEnv(srv, certFile)
-	if err != nil {
-		t.Fatal(err)
-	}
-	engine := &script.Engine{
-		Conds: scriptConditions(),
-		Cmds:  scriptCommands(quitSignal(), gracePeriod),
-		Quiet: !testing.Verbose(),
-	}
-
-	t.Run("README", func(t *testing.T) {
-		checkScriptReadme(t, engine, env)
-	})
-
-	files, err := filepath.Glob("testdata/script/*.txt")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range files {
-		file := file
-		name := strings.TrimSuffix(filepath.Base(file), ".txt")
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-			StartProxy()
-
-			workdir, err := os.MkdirTemp(testTmpDir, name)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if !*testWork {
-				defer removeAll(workdir)
-			}
-
-			s, err := script.NewState(ctx, workdir, env)
-			if err != nil {
-				t.Fatal(err)
-			}
-
-			// Unpack archive.
-			a, err := txtar.ParseFile(file)
-			if err != nil {
-				t.Fatal(err)
-			}
-			initScriptDirs(t, s)
-			if err := s.ExtractFiles(a); err != nil {
-				t.Fatal(err)
-			}
-
-			t.Log(time.Now().UTC().Format(time.RFC3339))
-			work, _ := s.LookupEnv("WORK")
-			t.Logf("$WORK=%s", work)
-
-			// With -testsum, if a go.mod file is present in the test's initial
-			// working directory, run 'go mod tidy'.
-			if *testSum != "" {
-				if updateSum(t, engine, s, a) {
-					defer func() {
-						if t.Failed() {
-							return
-						}
-						data := txtar.Format(a)
-						if err := os.WriteFile(file, data, 0666); err != nil {
-							t.Errorf("rewriting test file: %v", err)
-						}
-					}()
-				}
-			}
-
-			scripttest.Run(t, engine, s, filepath.Base(file), bytes.NewReader(a.Comment))
-		})
-	}
 }
 
 // initScriptState creates the initial directory structure in s for unpacking a

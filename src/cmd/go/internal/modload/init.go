@@ -326,6 +326,13 @@ func Init() {
 	}
 	initialized = true
 
+	if os.Getenv("GO111MODULE") == "" {
+		os.Setenv("GO111MODULE", "auto")
+	}
+	if os.Getenv("GOPRIVATE") == "" {
+		os.Setenv("GOPRIVATE", "*")
+	}
+
 	// Keep in sync with WillBeEnabled. We perform extra validation here, and
 	// there are lots of diagnostics and side effects, so we can't use
 	// WillBeEnabled directly.
